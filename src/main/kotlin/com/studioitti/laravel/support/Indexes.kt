@@ -12,6 +12,7 @@ import com.intellij.psi.util.CachedValueProvider
 import com.intellij.psi.util.CachedValuesManager
 import com.intellij.psi.util.PsiModificationTracker
 import com.intellij.psi.util.PsiTreeUtil
+import com.intellij.psi.xml.XmlTag
 import com.jetbrains.php.lang.psi.PhpFile
 import com.jetbrains.php.lang.psi.elements.ArrayCreationExpression
 import com.jetbrains.php.lang.psi.elements.FunctionReference
@@ -42,13 +43,17 @@ object Routes {
 	fun index(context: PsiElement): Index = cachedOn(context, "routes", Index(emptyMap(), emptyMap())) { dir ->
 		val routes = LinkedHashMap<String, PsiElement>()
 		val resources = LinkedHashMap<String, StringLiteralExpression>()
-		for (file in dir.allFiles().filterIsInstance<PhpFile>()) {
+		val files = dir.allFiles().filterIsInstance<PhpFile>()
+		val filePrefixes = filePrefixes(files, dir)
+		for (file in files) {
+			val filePrefix = filePrefixes[VfsUtilCore.getRelativePath(file.virtualFile, dir.virtualFile)].orEmpty()
 			for (call in PsiTreeUtil.findChildrenOfType(file, FunctionReference::class.java)) {
 				val first = call.parameters.firstOrNull() as? StringLiteralExpression ?: continue
 				when {
-					call is MethodReference && call.name == "name" -> routes.putIfAbsent(first.contents, first)
+					call is MethodReference && call.name == "name" && !isGroupPrefix(call) ->
+						routes.putIfAbsent(filePrefix + enclosingPrefix(call) + first.contents, first)
 					call !is MethodReference && call.name == "itti_resource_route" -> {
-						val name = first.contents
+						val name = filePrefix + enclosingPrefix(call) + first.contents
 						resources.putIfAbsent(name, first)
 						val only = (call.parameters.getOrNull(2) as? ArrayCreationExpression)
 							?.let { arr -> PsiTreeUtil.findChildrenOfType(arr, StringLiteralExpression::class.java).map { it.contents } }
@@ -59,6 +64,47 @@ object Routes {
 			}
 		}
 		Index(routes, resources)
+	}
+
+	/** The calls chained onto this one: `->name('x.')` in `->name('x.')->group(…)`. */
+	private fun chainAbove(call: MethodReference): Sequence<MethodReference> =
+		generateSequence(call) { m -> (m.parent as? MethodReference)?.takeIf { it.classReference == m } }.drop(1)
+
+	private fun isGroupPrefix(call: MethodReference) = chainAbove(call).any { it.name == "group" }
+
+	/** The route-name prefix a `group()` call adds: `->name('x.')` / `->as('x.')` before it, or `'as'` in its array. */
+	private fun namePrefix(group: MethodReference): String {
+		val chain = generateSequence(group.classReference as? MethodReference) { it.classReference as? MethodReference }.toList().reversed()
+		val chained = chain.filter { it.name == "name" || it.name == "as" }
+			.joinToString("") { (it.parameters.firstOrNull() as? StringLiteralExpression)?.contents.orEmpty() }
+		val array = group.parameters.firstOrNull() as? ArrayCreationExpression
+		val inArray = array?.let { PhpArrays.entry(it, "as") }?.let { PhpArrays.value(it) as? StringLiteralExpression }?.contents.orEmpty()
+		return chained + inArray
+	}
+
+	/** Prefixes of the groups whose arguments hold an element, outermost first. */
+	private fun enclosingPrefix(element: PsiElement): String {
+		val parts = ArrayList<String>()
+		var e = element.parent
+		while (e != null && e !is PsiFile) {
+			if (e is MethodReference && e.name == "group" && PsiTreeUtil.isAncestor(e.parameterList, element, true)) parts += namePrefix(e)
+			e = e.parent
+		}
+		return parts.reversed().joinToString("")
+	}
+
+	/** Route files mounted inside a group (`group(base_path('routes/x.php'))`, a `require` in a closure): their name prefix, by path under `routes/`. */
+	private fun filePrefixes(files: List<PhpFile>, dir: PsiDirectory): Map<String, String> {
+		val out = HashMap<String, String>()
+		for (file in files) {
+			for (literal in PsiTreeUtil.findChildrenOfType(file, StringLiteralExpression::class.java)) {
+				val path = literal.contents.takeIf { it.endsWith(".php") } ?: continue
+				val target = path.substringAfterLast("routes/").removePrefix("/")
+				if (dir.virtualFile.findFileByRelativePath(target) == null) continue
+				out.putIfAbsent(target, enclosingPrefix(literal))
+			}
+		}
+		return out
 	}
 }
 
@@ -72,28 +118,54 @@ object Views {
 	}
 }
 
-/** `<template #name>` / `v-slot:name` declarations in the admin's Vue pages. */
+/**
+ * Slots filled by `<template #name>` in the Vue files under `resources/js`, and which `.vue` files each imports,
+ * so a page's slots include those its components (LocalizedEditForm, AuditEntryForm…) fill on its behalf.
+ * Only a template directly inside the file's root component counts: deeper ones fill some inner widget's slot.
+ */
 object VueSlots {
-	private val SLOT = Regex("<template\\s+(?:#|v-slot:)([A-Za-z_][\\w-]*)")
+	private val NAME = Regex("""^(?:#|v-slot:)([A-Za-z_][\w.-]*)$""")
+	private val IMPORT = Regex("""import\s+\w+\s+from\s+["']([^"']+\.vue)["']""")
 
-	class Slot(val name: String, val file: PsiFile, val offset: Int) {
-		val element: PsiElement get() = file.findElementAt(offset) ?: file
-	}
+	class Slot(val name: String, val file: PsiFile, val element: PsiElement)
 
-	fun all(context: PsiElement): List<Slot> = cachedOn(context, "resources/js/Pages/Admin", emptyList()) { dir ->
-		dir.allFiles().filter { it.name.endsWith(".vue") }.flatMap { file ->
-			SLOT.findAll(file.text).map { Slot(it.groupValues[1], file, it.groups[1]!!.range.first) }.toList()
+	class Index(val slots: Map<VirtualFile, List<Slot>>, val imports: Map<VirtualFile, List<VirtualFile>>) {
+		val all: List<Slot> get() = slots.values.flatten()
+
+		/** The files themselves and every `.vue` file they import, transitively. */
+		fun reachable(from: Collection<VirtualFile>): Set<VirtualFile> {
+			val seen = LinkedHashSet<VirtualFile>()
+			val queue = ArrayDeque(from)
+			while (queue.isNotEmpty()) {
+				val f = queue.removeFirst()
+				if (seen.add(f)) imports[f]?.let(queue::addAll)
+			}
+			return seen
 		}
 	}
 
-	fun slotAt(element: PsiElement): String? {
-		val text = element.text
-		return when {
-			text.startsWith("#") -> text.substring(1)
-			text.startsWith("v-slot:") -> text.substring(7)
-			else -> null
-		}?.takeWhile { it.isLetterOrDigit() || it == '_' || it == '-' }?.takeIf { it.isNotEmpty() }
+	fun index(context: PsiElement): Index = cachedOn(context, "resources/js", Index(emptyMap(), emptyMap())) { dir ->
+		val slots = LinkedHashMap<VirtualFile, List<Slot>>()
+		val imports = HashMap<VirtualFile, List<VirtualFile>>()
+		for (file in dir.allFiles().filter { it.name.endsWith(".vue") }) {
+			val vf = file.virtualFile ?: continue
+			slots[vf] = PsiTreeUtil.findChildrenOfType(file, XmlTag::class.java).mapNotNull { slotOf(file, it) }
+			imports[vf] = IMPORT.findAll(file.text).mapNotNull { vf.parent?.findFileByRelativePath(it.groupValues[1]) }.toList()
+		}
+		Index(slots, imports)
 	}
+
+	private fun slotOf(file: PsiFile, tag: XmlTag): Slot? {
+		if (tag.name != "template") return null
+		val root = tag.parentTag?.parentTag ?: return null
+		if (root.name != "template" || root.parentTag != null) return null
+		val attribute = tag.attributes.firstOrNull { name(it.name) != null } ?: return null
+		return Slot(name(attribute.name)!!, file, attribute.nameElement ?: attribute)
+	}
+
+	private fun name(attribute: String): String? = NAME.find(attribute)?.groupValues?.get(1)
+
+	fun slotAt(element: PsiElement): String? = name(element.text)
 }
 
 fun VirtualFile.relativeTo(context: PsiElement): String =

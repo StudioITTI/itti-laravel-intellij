@@ -4,6 +4,7 @@ import com.studioitti.laravel.lang.LangKeys
 import com.studioitti.laravel.lang.LangTarget
 import com.studioitti.laravel.model.Domains
 import com.studioitti.laravel.model.Models
+import com.studioitti.laravel.support.LabelledTarget
 import com.studioitti.laravel.support.LaravelProject
 import com.studioitti.laravel.support.MdiIcons
 import com.studioitti.laravel.support.PhpArrays
@@ -100,16 +101,22 @@ object Targets {
 		))
 	}
 
-	/** A slot name: `slot` / `emptySlot` / a `cells` value, defined by `<template #name>` in the domain's pages. */
+	/** A slot name: `slot` / `emptySlot` / a `cells` value, filled by `<template #name>` in the domain's pages or the components they import. */
 	fun slot(element: PsiElement, model: PhpClass?, value: String, range: TextRange): Array<PsiReference> {
 		fun candidates(): List<VueSlots.Slot> {
-			val all = VueSlots.all(element)
+			val index = VueSlots.index(element)
 			val pages = model?.let { Domains.pagesOfModel(it).map { p -> p.virtualFile } }.orEmpty()
-			return all.filter { it.file.virtualFile in pages }.ifEmpty { all }
+			val files = index.reachable(pages)
+			return index.all.filter { it.file.virtualFile in files }.ifEmpty { index.all }
 		}
 		return one(TargetReference(
 			element, range,
-			{ candidates().filter { it.name == value }.map { it.element } },
+			{
+				candidates().filter { it.name == value }.map { slot ->
+					val location = slot.file.virtualFile?.relativeTo(slot.element)
+					LabelledTarget(slot.element, "#${slot.name}", location, AllIcons.Nodes.Template)
+				}
+			},
 			{ candidates().map { lookup(it.name, it.file.name, AllIcons.Nodes.Template) }.distinctBy { it.lookupString } },
 			"No <template #$value> in this domain's pages",
 		))

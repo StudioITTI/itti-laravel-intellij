@@ -12,7 +12,7 @@ import com.jetbrains.php.lang.psi.elements.StringLiteralExpression
 /** How a domain's pieces find each other: model ↔ controller (constructor type) ↔ Inertia pages. */
 object Domains {
 	private const val BASE_CONTROLLER = "\\App\\Http\\Controllers\\BaseInertiaCRUDController"
-	private val PAGE = Regex("^Admin/[A-Za-z0-9_/]+$")
+	private val PAGE = Regex("^[A-Z][A-Za-z0-9_]*/[A-Za-z0-9_/]+$")
 	val SCHEMA_FILES = listOf("ModelSchema.yaml", "ListSchema.yaml", "EditSchema.yaml")
 
 	fun isController(cls: PhpClass): Boolean =
@@ -34,7 +34,7 @@ object Domains {
 	fun controllersOf(model: PhpClass): List<PhpClass> =
 		controllers(model).filter { modelOf(it)?.fqn == model.fqn }
 
-	/** The Vue pages a controller renders, from the `Admin/<Domain>/<Page>` literals in it. */
+	/** The Vue pages a controller renders, from the `Admin/<Domain>/<Page>` (or `Central/…`) literals in it. */
 	fun pagesOf(controller: PhpClass): List<PsiFile> {
 		val manager = PsiManager.getInstance(controller.project)
 		val root = LaravelProject.root(controller) ?: return emptyList()

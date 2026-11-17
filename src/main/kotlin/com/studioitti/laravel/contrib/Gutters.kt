@@ -70,18 +70,19 @@ class YamlDomainLineMarker : RelatedItemLineMarkerProvider() {
 	}
 }
 
-/** On `<template #name>` in an admin page: the schema entries (`slot`, `emptySlot`, `cells`) that use it. */
+/** On `<template #name>` in a page, or a component a page imports: the schema entries (`slot`, `emptySlot`, `cells`) that use it. */
 class VueSlotLineMarker : RelatedItemLineMarkerProvider() {
 	override fun collectNavigationMarkers(element: PsiElement, result: MutableCollection<in RelatedItemLineMarkerInfo<*>>) {
 		if (element.firstChild != null) return
 		val attribute = element.parent as? XmlAttribute ?: return
 		if (attribute.nameElement != element) return
 		val name = VueSlots.slotAt(element) ?: return
-		val page = element.containingFile?.originalFile?.virtualFile ?: return
-		if (!page.path.contains("/resources/js/Pages/Admin/")) return
+		val file = element.containingFile?.originalFile?.virtualFile ?: return
+		val index = VueSlots.index(element)
+		if (index.slots[file].orEmpty().none { it.name == name }) return
 
 		val controllers = Domains.controllers(element)
-			.filter { ctrl ->Domains.pagesOf(ctrl).any { it.virtualFile == page } }
+			.filter { ctrl -> file in index.reachable(Domains.pagesOf(ctrl).map { it.virtualFile }) }
 		val yamls: List<PsiFile> = controllers.mapNotNull { Domains.modelOf(it) }.distinct().flatMap { Domains.schemaFiles(it) }
 		val uses = yamls.flatMap { PsiTreeUtil.findChildrenOfType(it, YAMLScalar::class.java) }.filter { scalar ->
 			val kv = scalar.parent as? YAMLKeyValue ?: return@filter false

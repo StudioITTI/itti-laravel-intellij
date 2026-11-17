@@ -56,9 +56,23 @@ class Phase2Test : BasePlatformTestCase() {
 			itti_resource_route('users.logins', UsersLoginsCtrl::class, ['index', 'edit']);
 		""")
 		add("resources/js/Pages/Admin/Users/Edit.vue", """
+			<script setup>
+			import LocalizedForm from "../../../Components/LocalizedForm.vue";
+			</script>
 			<template>
 			  <super-edit-form>
 			    <template #two_factor><v-icon icon="mdi-home"/></template>
+			  </super-edit-form>
+			</template>
+		""")
+		add("resources/js/Components/LocalizedForm.vue", """
+			<template>
+			  <super-edit-form>
+			    <template v-for="(_, name) in ${d}slots" #[name]="p"><slot :name="name"/></template>
+			    <template #locale_switcher>
+			      <menu-x><template #activator>x</template></menu-x>
+			    </template>
+			    <template #field.type>x</template>
 			  </super-edit-form>
 			</template>
 		""")
@@ -105,6 +119,71 @@ class Phase2Test : BasePlatformTestCase() {
 	fun testSlotResolvesToTheDomainsVueTemplate() {
 		val r = refs("app/Domains/Users/EditSchema.yaml", "edit:\n  formLayout:\n    - slot: two_<caret>factor\n")
 		assertEquals("Edit.vue", r.single().single().fileName)
+	}
+
+	fun testSlotFilledByAnImportedComponent() {
+		val r = refs("app/Domains/Users/EditSchema.yaml", "edit:\n  formLayout:\n    - slot: locale_sw<caret>itcher\n")
+		assertEquals("LocalizedForm.vue", r.single().single().fileName)
+	}
+
+	fun testSlotOfANonAdminPageResolvesToItsOwnPageWithALabel() {
+		fun add(path: String, text: String) = myFixture.addFileToProject(path, text.trimIndent())
+		add("app/Domains/Central/AdminUsers/AdminUser.php", """
+			<?php
+			namespace App\Domains\Central\AdminUsers;
+			class AdminUser implements \App\Contracts\ModelSchema\IHasModelSchema {}
+		""")
+		add("app/Domains/Central/AdminUsers/AdminUsersCtrl.php", """
+			<?php
+			namespace App\Domains\Central\AdminUsers;
+			class AdminUsersCtrl extends \App\Http\Controllers\BaseInertiaCRUDController {
+				public function __construct(AdminUser ${d}model) {}
+				public function edit() { return 'Central/AdminUsers/Edit'; }
+			}
+		""")
+		add("resources/js/Pages/Central/AdminUsers/Edit.vue", "<template>\n  <super-edit-form>\n    <template #two_factor>x</template>\n  </super-edit-form>\n</template>")
+		val target = refs("app/Domains/Central/AdminUsers/EditSchema.yaml", "edit:\n  formLayout:\n    - slot: two_<caret>factor\n").single().single()
+		val row = com.intellij.codeInsight.navigation.targetPresentation(target)
+		assertEquals("#two_factor | resources/js/Pages/Central/AdminUsers/Edit.vue", "${row.presentableText} | ${row.containerText}")
+	}
+
+	fun testDottedSlotName() {
+		val r = refs("app/Domains/Users/EditSchema.yaml", "edit:\n  formLayout:\n    - slot: field.t<caret>ype\n")
+		assertEquals("LocalizedForm.vue", r.single().single().fileName)
+	}
+
+	fun testSlotCompletionSkipsInnerWidgetSlots() {
+		val file = myFixture.addFileToProject("app/Domains/Users/EditSchema.yaml", "edit:\n  formLayout:\n    - slot: x<caret>y\n")
+		myFixture.configureFromExistingVirtualFile(file.virtualFile)
+		val host = myFixture.file.findReferenceAt(myFixture.caretOffset)!!.element
+		val names = References.of(host).single().variants.map { (it as com.intellij.codeInsight.lookup.LookupElement).lookupString }
+		assertFalse(names.toString(), "activator" in names)
+		assertTrue(names.toString(), "two_factor" in names && "locale_switcher" in names)
+	}
+
+	fun testVueSlotGutterOnAnImportedComponent() {
+		myFixture.addFileToProject("app/Domains/Users/EditSchema.yaml", "edit:\n  formLayout:\n    - slot: locale_switcher\n")
+		myFixture.configureFromExistingVirtualFile(myFixture.findFileInTempDir("resources/js/Components/LocalizedForm.vue"))
+		val gutters = myFixture.findAllGutters().map { it.tooltipText }
+		assertTrue(gutters.toString(), gutters.contains("Schema uses of slot 'locale_switcher'"))
+	}
+
+	fun testRouteNamesCarryGroupPrefixes() {
+		myFixture.addFileToProject("routes/web.php", "<?php\nRoute::prefix('be')->name('central.')->group(base_path('routes/central.php'));")
+		myFixture.addFileToProject("routes/central.php", """
+			<?php
+			Route::middleware(['auth'])->group(function () {
+				itti_resource_route('admin_users.logins', AdminUsersLoginsCtrl::class, ['index', 'edit']);
+				Route::group(['as' => 'tools.'], function () {
+					Route::get('x', fn() => 1)->name('run');
+				});
+			});
+		""".trimIndent())
+		val list = refs("app/Domains/Users/EditSchema.yaml", "edit:\n  formLayout:\n    - list: central.admin_users.lo<caret>gins\n")
+		assertEquals("'admin_users.logins'", list.single().single().text)
+		val routes = com.studioitti.laravel.support.Routes.index(myFixture.file).routes.keys
+		assertTrue(routes.toString(), "central.tools.run" in routes && "central.admin_users.logins.edit" in routes)
+		assertFalse(routes.toString(), "central." in routes || "run" in routes)
 	}
 
 	fun testNestedListResolvesToItsResourceRoute() {
