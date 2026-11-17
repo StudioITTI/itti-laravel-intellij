@@ -149,4 +149,14 @@ class FieldPathReference(
 		PsiElementResolveResult.createResults(step?.targets ?: emptyList())
 
 	override fun getVariants(): Array<Any> = step?.variants?.invoke()?.toTypedArray() ?: emptyArray()
+
+	/** Renaming an accessor method renames the snake_case attribute it provides. */
+	override fun handleElementRename(newElementName: String): PsiElement {
+		val current = value
+		val accessor = step?.targets?.filterIsInstance<com.jetbrains.php.lang.psi.elements.Method>()
+			?.any { it.name != current && Models.snake(it.name.removePrefix("get").removeSuffix("Attribute")) == current } == true
+		val name = if (!accessor) newElementName
+		else Models.snake(Regex("^get(\\w+)Attribute$").find(newElementName)?.groupValues?.get(1) ?: newElementName)
+		return super.handleElementRename(name)
+	}
 }

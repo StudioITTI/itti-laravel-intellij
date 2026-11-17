@@ -1,5 +1,6 @@
 package com.studioitti.laravel.contrib
 
+import com.studioitti.laravel.lang.CreateLangKeyFix
 import com.studioitti.laravel.lang.LangKeyReference
 import com.studioitti.laravel.lang.LangKeys
 import com.studioitti.laravel.model.FieldPathReference
@@ -71,16 +72,17 @@ class ReferenceAnnotator : Annotator {
 			val key = segments.joinToString(".")
 			val range = TextRange(lang.first().rangeInElement.startOffset, last.rangeInElement.endOffset).shiftRight(base)
 			val found = LangKeys.resolve(element, segments).map { it.locale }.toSet()
+			val missing = LangKeys.locales(element).filter { it !in found }
 			if (found.isEmpty()) {
 				if (!LangKeys.inJson(element, key)) {
-					holder.newAnnotation(HighlightSeverity.WARNING, "Unknown translation key '$key'").range(range).create()
+					holder.newAnnotation(HighlightSeverity.WARNING, "Unknown translation key '$key'").range(range)
+						.withFix(CreateLangKeyFix(segments, missing)).create()
 				}
 				return@let
 			}
-			val missing = LangKeys.locales(element).filter { it !in found }
 			if (missing.isNotEmpty()) {
 				holder.newAnnotation(HighlightSeverity.WEAK_WARNING, "Translation '$key' missing in: ${missing.joinToString(", ")}")
-					.range(range).create()
+					.range(range).withFix(CreateLangKeyFix(segments, missing)).create()
 			}
 		}
 
@@ -102,6 +104,12 @@ class ReferenceAnnotator : Annotator {
 		for (ref in refs.filterIsInstance<Targets.PermissionCheck>()) {
 			for (problem in ref.problems()) {
 				holder.newAnnotation(HighlightSeverity.WEAK_WARNING, problem).range(ref.rangeInElement.shiftRight(base)).create()
+			}
+		}
+
+		for (ref in refs.filterIsInstance<Targets.ProblemCheck>()) {
+			for (problem in ref.problems()) {
+				holder.newAnnotation(HighlightSeverity.WARNING, problem).range(ref.rangeInElement.shiftRight(base)).create()
 			}
 		}
 	}

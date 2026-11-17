@@ -54,13 +54,40 @@ object Targets {
 		))
 	}
 
-	/** An `itti_resource_route()` name: `list:` in a form layout. */
+	/** An `itti_resource_route()` name: `list:` in a form layout. Its route line, controller and the controller's schemas. */
 	fun resource(element: PsiElement, value: String, range: TextRange) = one(TargetReference(
 		element, range,
-		{ listOfNotNull(Routes.index(element).resources[value]) },
+		{
+			val literal = Routes.index(element).resources[value]
+			listOfNotNull(literal) + (literal?.let(::resourceDomain) ?: emptyList())
+		},
 		{ Routes.index(element).resources.keys.map { lookup(it, "resource", AllIcons.Nodes.Related) } },
 		"Unknown resource '$value' (no itti_resource_route)",
 	))
+
+	/** The controller named in `itti_resource_route('x', XCtrl::class)`, and its model's schema YAML. */
+	private fun resourceDomain(literal: PsiElement): List<PsiElement> {
+		val call = literal.parent?.parent as? com.jetbrains.php.lang.psi.elements.FunctionReference ?: return emptyList()
+		val ref = (call.parameters.getOrNull(1) as? com.jetbrains.php.lang.psi.elements.ClassConstantReference)?.classReference
+		val controller = (ref as? com.jetbrains.php.lang.psi.elements.ClassReference)?.resolve() as? PhpClass ?: return emptyList()
+		return listOf(controller) + (Domains.modelOf(controller)?.let { Domains.schemaFiles(it) } ?: emptyList())
+	}
+
+	/** `repeater:` in a form layout: the field must be declared in ModelSchema with an `array-item`. */
+	fun repeaterCheck(element: PsiElement, model: PhpClass, value: String, range: TextRange) = ProblemCheck(element, range) {
+		val declared = Models.schemaFields(model)?.getKeyValueByKey(value)?.value as? YAMLMapping
+		when {
+			declared?.getKeyValueByKey("array-item") != null -> emptyList()
+			declared == null && value !in Models.fields(model) -> emptyList() // unknown: the field path says so
+			else -> listOf("'$value' has no array-item in ModelSchema.yaml, so it cannot be a repeater")
+		}
+	}
+
+	/** Not a navigation target of its own — carries warnings for the annotator. */
+	class ProblemCheck(element: PsiElement, range: TextRange, val problems: () -> List<String>) :
+		com.intellij.psi.PsiReferenceBase<PsiElement>(element, range, true) {
+		override fun resolve(): PsiElement? = null
+	}
 
 	/** A Blade view by dotted name. */
 	fun view(element: PsiElement, value: String, range: TextRange, prefix: String = "") = one(TargetReference(

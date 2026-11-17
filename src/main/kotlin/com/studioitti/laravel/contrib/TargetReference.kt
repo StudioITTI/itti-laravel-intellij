@@ -30,4 +30,11 @@ class TargetReference(
 		PsiElementResolveResult.createResults(resolved)
 
 	override fun getVariants(): Array<Any> = variants().toTypedArray()
+
+	/** Usages are asked about the real element, not the wrapper a chooser row needs; a slot by its attribute. */
+	override fun isReferenceTo(target: PsiElement): Boolean = resolved.any { r ->
+		val e = (r as? com.studioitti.laravel.support.LabelledTarget)?.element
+			?: (r as? com.studioitti.laravel.lang.LangTarget)?.element ?: r
+		element.manager.areElementsEquivalent(e, target) || (target is com.intellij.psi.xml.XmlAttribute && e.parent == target)
+	}
 }

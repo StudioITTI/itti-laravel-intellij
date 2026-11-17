@@ -70,6 +70,9 @@ object References {
 		val inLayout = isInLayout(path)
 
 		return when {
+			isLayoutField(path) && path.last() == "repeater" ->
+				FieldPath.references(scalar, model, text, range, PathMode.FIELD) + Targets.repeaterCheck(scalar, model, text, range)
+
 			joined in setOf("list.columns.[]", "list.columns.[].field", "list.search.[]", "list.totals.[].field")
 				|| FILTER_PATH.matches(joined)
 				|| isLayoutField(path) ->
@@ -159,6 +162,7 @@ object References {
 		val text = range.substring(literal.text)
 		val fileName = literal.containingFile.originalFile.name
 
+		if (Declarations.kind(literal) != null) return arrayOf(DeclarationReference(literal, range))
 		if (MdiIcons.isName(text)) return Targets.icon(literal, text, range)
 		restricted(literal, text, range)?.let { return it }
 		mail(literal, text, range, fileName)?.let { return it }

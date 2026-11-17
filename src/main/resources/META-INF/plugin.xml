@@ -36,5 +36,8 @@
         <codeInsight.lineMarkerProvider language="yaml" implementationClass="com.studioitti.laravel.contrib.YamlDomainLineMarker"/>
         <codeInsight.lineMarkerProvider language="HTML" implementationClass="com.studioitti.laravel.contrib.VueSlotLineMarker"/>
         <typedHandler implementation="com.studioitti.laravel.contrib.DotAutoPopup"/>
+        <referencesSearch implementation="com.studioitti.laravel.contrib.UsageSearcher"/>
+        <findUsagesHandlerFactory implementation="com.studioitti.laravel.contrib.UsagesHandlerFactory"/>
+        <renameHandler implementation="com.studioitti.laravel.contrib.DeclarationRenameHandler"/>
     </extensions>
 </idea-plugin>
