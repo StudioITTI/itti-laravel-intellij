@@ -43,7 +43,9 @@ object Migrations {
 
 	private fun build(dir: PsiDirectory): Map<String, Map<String, List<PsiElement>>> {
 		val tables = LinkedHashMap<String, LinkedHashMap<String, MutableList<PsiElement>>>()
-		val files = dir.files.filterIsInstance<PhpFile>().sortedBy { it.name }
+		// subfolders too (`migrations/tenant/`); by file name, so the dated order holds across them
+		fun all(d: PsiDirectory): List<PhpFile> = d.files.filterIsInstance<PhpFile>() + d.subdirectories.flatMap { all(it) }
+		val files = all(dir).sortedBy { it.name }
 		for (file in files) {
 			for (call in PsiTreeUtil.findChildrenOfType(file, MethodReference::class.java)) {
 				if (call.name != "create" && call.name != "table") continue

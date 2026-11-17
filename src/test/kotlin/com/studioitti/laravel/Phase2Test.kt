@@ -272,6 +272,57 @@ class Phase2Test : BasePlatformTestCase() {
 		assertEquals(listOf("permissions.php", "admin.php"), targets.map { it.fileName })
 	}
 
+	fun testScopedPermissions() {
+		fun add(path: String, text: String) = myFixture.addFileToProject(path, text.trimIndent())
+		add("config/permissions.php", """
+			<?php return [
+				'default_scope' => 'tenant',
+				'output' => ['tenant' => database_path('permissions/tenant.php'), 'central' => database_path('permissions/central.php')],
+			];
+		""")
+		add("database/permissions/central.php", "<?php return array ('admin' => 'Administration', 'admin@reset' => 'Reset');")
+		add("database/permissions/tenant.php", "<?php return array ('staff' => 'Staff');")
+		myFixture.saveText(myFixture.findFileInTempDir("resources/lang/en/admin.php"), "<?php return ['permissions' => ['central' => ['admin' => 'Administration', 'admin@reset' => 'Reset', 'admin@staff' => 'Staff']]];")
+		myFixture.saveText(myFixture.findFileInTempDir("resources/lang/bg/admin.php"), "<?php return ['permissions' => ['central' => ['admin@reset' => 'Нулиране']]];")
+		val file = add("app/Domains/Central/X/XCtrl.php", """
+			<?php
+			namespace App\Domains\Central\X;
+			use App\Auth\Restricted;
+			#[Restricted('admin', 'Administration', scope: 'central')]
+			class XCtrl {
+				#[Restricted('reset')]
+				public function reset() {}
+				#[Restricted('staff')]
+				public function staff() {}
+			}
+		""")
+		myFixture.configureFromExistingVirtualFile(file.virtualFile)
+		val w = myFixture.doHighlighting().mapNotNull { it.description }.filter { "permission" in it }
+		assertEquals(listOf(
+			"No admin.permissions.central.admin translation in: bg",
+			"'admin@staff' is not in database/permissions/central.php — run `php artisan permissions:build --preserve`",
+			"No admin.permissions.central.admin@staff translation in: bg",
+		), w)
+		myFixture.editor.caretModel.moveToOffset(myFixture.file.text.indexOf("'reset'") + 2)
+		val targets = References.of(myFixture.file.findReferenceAt(myFixture.caretOffset)!!.element)
+			.filterIsInstance<PsiPolyVariantReference>().flatMap { it.multiResolve(false).mapNotNull { r -> r.element } }
+		assertEquals(listOf("central.php", "admin.php", "admin.php"), targets.map { it.fileName })
+	}
+
+	fun testMigrationsInSubfolders() {
+		val file = myFixture.addFileToProject("database/migrations/tenant/0002_create_assets_table.php", """
+			<?php
+			return new class {
+				public function up(): void {
+					Schema::create('assets', function (Blueprint ${d}table) {
+						${d}table->string('code');
+					});
+				}
+			};
+		""".trimIndent())
+		assertTrue(com.studioitti.laravel.model.Migrations.columns(file, "assets").containsKey("code"))
+	}
+
 	fun testDomainGutters() {
 		myFixture.configureFromExistingVirtualFile(myFixture.findFileInTempDir("app/Domains/Users/UsersCtrl.php"))
 		val ctrl = myFixture.findAllGutters().map { it.tooltipText }

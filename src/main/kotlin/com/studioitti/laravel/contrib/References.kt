@@ -215,19 +215,32 @@ object References {
 		val attribute = PsiTreeUtil.getParentOfType(literal, PhpAttribute::class.java) ?: return null
 		if (attribute.fqn?.endsWith("\\Restricted") != true) return null
 		if (PsiTreeUtil.findChildOfType(attribute, StringLiteralExpression::class.java) != literal) return null
+		val scope: String?
 		val permission = when (val owner = attribute.owner) {
 			is Method -> {
 				val cls = owner.containingClass ?: return null
-				val classScope = cls.getAttributes(attribute.fqn ?: return null).firstOrNull()
+				val classAttribute = cls.getAttributes(attribute.fqn ?: return null).firstOrNull()
+				val classScope = classAttribute
 					?.let { PsiTreeUtil.findChildOfType(it, StringLiteralExpression::class.java)?.contents }
 					?: cls.fqn.removePrefix("\\")
+				// a method attribute inherits the class's permission set unless it names its own
+				scope = permissionScope(attribute) ?: classAttribute?.let(::permissionScope)
 				"$classScope@$text"
 			}
-			is PhpClass -> text
+			is PhpClass -> {
+				scope = permissionScope(attribute)
+				text
+			}
 			else -> return null
 		}
-		return Targets.permission(literal, permission, range)
+		return Targets.permission(literal, permission, scope, range)
 	}
+
+	/** The `scope:` argument of a `#[Restricted]`, when it is a literal. */
+	private fun permissionScope(attribute: PhpAttribute): String? =
+		attribute.arguments.firstOrNull { it.name == "scope" }?.argument?.value
+			?.trim()?.takeIf { it.length >= 2 && it.first() == it.last() && it.first() in "'\"" }
+			?.let { it.substring(1, it.length - 1) }
 
 	/**
 	 * Mail template codes passed to MailTemplateRenderer / EmailTemplate, the placeholder keys handed to

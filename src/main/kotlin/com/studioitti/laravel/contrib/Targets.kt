@@ -157,10 +157,36 @@ object Targets {
 			?.let { PhpArrays.entry(it, "placeholders") }
 			?.let { PhpArrays.value(it) as? ArrayCreationExpression }
 
-	/** `#[Restricted('perm')]`: the generated map entry and its `admin.permissions.<perm>` translation. */
-	fun permission(element: PsiElement, permission: String, range: TextRange): Array<PsiReference> {
-		fun map() = LaravelProject.psiFile(element, "database/permissions.php")?.let { PhpArrays.returnedArray(it) }
-		val langKey = listOf("admin", "permissions", permission)
+	/**
+	 * Where a permission is listed and translated. One set: `database/permissions.php`, `admin.permissions.<perm>`.
+	 * Per scope (`config('permissions.output')`): that scope's file, `admin.permissions.<scope>.<perm>`.
+	 */
+	class PermissionSet(val mapPath: String?, val langPrefix: List<String>)
+
+	fun permissionSet(element: PsiElement, scope: String?): PermissionSet {
+		val output = PhpArrays.configValue(element, "permissions.output") as? ArrayCreationExpression
+			?: return PermissionSet("database/permissions.php", listOf("admin", "permissions"))
+		val resolved = scope
+			?: (PhpArrays.configValue(element, "permissions.default_scope") as? com.jetbrains.php.lang.psi.elements.StringLiteralExpression)?.contents
+			?: return PermissionSet(null, listOf("admin", "permissions"))
+		val path = PhpArrays.entry(output, resolved)?.let { PhpArrays.value(it) }?.let(::projectPath)
+		return PermissionSet(path, listOf("admin", "permissions", resolved))
+	}
+
+	/** `database_path('x')` / `base_path('x')` / `'x'` as a path relative to the project root. */
+	private fun projectPath(e: PsiElement): String? {
+		if (e is com.jetbrains.php.lang.psi.elements.StringLiteralExpression) return e.contents
+		val call = e as? com.jetbrains.php.lang.psi.elements.FunctionReference ?: return null
+		val arg = (call.parameters.firstOrNull() as? com.jetbrains.php.lang.psi.elements.StringLiteralExpression)?.contents?.removePrefix("/") ?: return null
+		val base = mapOf("base_path" to "", "database_path" to "database/", "config_path" to "config/", "storage_path" to "storage/")[call.name] ?: return null
+		return base + arg
+	}
+
+	/** `#[Restricted('perm')]`: the generated map entry and its translations. */
+	fun permission(element: PsiElement, permission: String, scope: String?, range: TextRange): Array<PsiReference> {
+		val set = permissionSet(element, scope)
+		fun map() = set.mapPath?.let { LaravelProject.psiFile(element, it) }?.let { PhpArrays.returnedArray(it) }
+		val langKey = set.langPrefix + permission
 		return arrayOf(
 			TargetReference(
 				element, range,
@@ -170,13 +196,14 @@ object Targets {
 				},
 				unknown = null,
 			),
-			PermissionCheck(element, range, permission, ::map),
+			PermissionCheck(element, range, permission, set.mapPath, langKey, ::map),
 		)
 	}
 
 	/** Not a navigation target of its own — carries the permission warnings for the annotator. */
 	class PermissionCheck(
 		element: PsiElement, range: TextRange, val permission: String,
+		private val mapPath: String?, private val langKey: List<String>,
 		private val map: () -> ArrayCreationExpression?,
 	) : com.intellij.psi.PsiReferenceBase<PsiElement>(element, range, true) {
 		override fun resolve(): PsiElement? = null
@@ -185,11 +212,11 @@ object Targets {
 			val out = ArrayList<String>()
 			val map = map()
 			if (map != null && PhpArrays.entry(map, permission) == null) {
-				out += "'$permission' is not in database/permissions.php — run `php artisan permissions:build --preserve`"
+				out += "'$permission' is not in $mapPath — run `php artisan permissions:build --preserve`"
 			}
-			val found = LangKeys.resolve(element, listOf("admin", "permissions", permission)).map { it.locale }.toSet()
+			val found = LangKeys.resolve(element, langKey).map { it.locale }.toSet()
 			val missing = LangKeys.locales(element).filter { it !in found }
-			if (missing.isNotEmpty()) out += "No admin.permissions.$permission translation in: ${missing.joinToString(", ")}"
+			if (missing.isNotEmpty()) out += "No ${langKey.joinToString(".")} translation in: ${missing.joinToString(", ")}"
 			return out
 		}
 	}
