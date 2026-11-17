@@ -1,19 +1,31 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
     <id>com.studioitti.laravel</id>
-    <name>itti-laravel-intellij</name>
+    <name>ITTI Laravel Template Support</name>
     <vendor>StudioITTI</vendor>
     <description><![CDATA[
-        <p><b>itti-laravel-intellij</b> is a repository that provides a pure template to make it easier to create a new plugin project.</p>
-        <p>The main goal of this template is to speed up the setup phase of plugin development for both new and experienced developers by preconfiguring the project scaffold and CI, linking to the proper documentation pages, and keeping everything organized.</p>
+        <p>Navigation, completion and checks for projects built on the StudioITTI Laravel template:</p>
+        <ul>
+            <li>translation keys (<code>labelKey</code> &amp; co. in schema YAML and PHP arrays, <code>t()</code> / <code>$t()</code> in Vue), per segment, every locale</li>
+            <li><code>rel:</code> paths and field names in <code>ModelSchema</code> / <code>ListSchema</code> / <code>EditSchema</code> YAML, through the model's relations</li>
+        </ul>
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
-
-    <resource-bundle>messages.MyBundle</resource-bundle>
+    <depends>com.jetbrains.php</depends>
+    <depends>org.jetbrains.plugins.yaml</depends>
+    <depends>JavaScript</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.studioitti.laravel.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
-        <postStartupActivity implementation="com.studioitti.laravel.startup.MyProjectActivity" />
+        <psi.referenceContributor language="yaml"
+                                  implementation="com.studioitti.laravel.contrib.YamlReferenceContributor"/>
+        <psi.referenceContributor language="JavaScript"
+                                  implementation="com.studioitti.laravel.contrib.JsReferenceContributor"/>
+        <psi.referenceContributor language="PHP"
+                                  implementation="com.studioitti.laravel.contrib.PhpReferenceContributor"/>
+        <annotator language="yaml" implementationClass="com.studioitti.laravel.contrib.ReferenceAnnotator"/>
+        <annotator language="JavaScript" implementationClass="com.studioitti.laravel.contrib.ReferenceAnnotator"/>
+        <annotator language="PHP" implementationClass="com.studioitti.laravel.contrib.ReferenceAnnotator"/>
+        <typedHandler implementation="com.studioitti.laravel.contrib.DotAutoPopup"/>
     </extensions>
 </idea-plugin>
