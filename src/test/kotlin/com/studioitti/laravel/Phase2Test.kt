@@ -209,6 +209,45 @@ class Phase2Test : BasePlatformTestCase() {
 		assertNull(index.route("dyn.a.b.show"))
 	}
 
+	fun testSlotsUnderAWrapperElementCount() {
+		val page = myFixture.addFileToProject("resources/js/Pages/Admin/Wrapped/Edit.vue", """
+			<template>
+			  <div>
+			    <super-edit-form>
+			      <template #wrapped><menu-x><template #inner>x</template></menu-x></template>
+			    </super-edit-form>
+			  </div>
+			</template>
+		""".trimIndent())
+		val index = com.studioitti.laravel.support.VueSlots.index(page)
+		assertEquals(listOf("wrapped"), index.slots[page.virtualFile]!!.map { it.name })
+	}
+
+	fun testTableRenamesMoveColumnsAndDownIsIgnored() {
+		val file = myFixture.addFileToProject("database/migrations/tenant/0003_vendors.php", """
+			<?php
+			return new class {
+				public function up(): void {
+					Schema::create('vendors', function (Blueprint ${d}table) { ${d}table->string('name'); });
+					${d}this->renameTable('vendors', 'business_partners');
+					Schema::rename('business_partners', 'partners');
+					Schema::table('partners', function (Blueprint ${d}table) { ${d}table->timestamps(); });
+				}
+				public function down(): void {
+					Schema::rename('partners', 'vendors');
+				}
+			};
+		""".trimIndent())
+		val m = com.studioitti.laravel.model.Migrations
+		assertEquals(setOf("name", "created_at", "updated_at"), m.columns(file, "partners").keys)
+		assertFalse(m.hasTable(file, "vendors") || m.hasTable(file, "business_partners"))
+	}
+
+	fun testBareMdiPrefixIsNotAnIcon() {
+		val w = warnings("resources/js/icons.js", "const a = 'mdi-' + name; const b = 'mdi-nope'")
+		assertEquals(listOf("Unknown icon 'mdi-nope'"), w.filter { "icon" in it })
+	}
+
 	fun testNestedListResolvesToItsResourceRoute() {
 		val r = refs("app/Domains/Users/EditSchema.yaml", "edit:\n  formLayout:\n    - list: users.lo<caret>gins\n")
 		assertEquals("'users.logins'", r.single().single().text)

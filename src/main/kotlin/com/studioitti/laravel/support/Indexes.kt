@@ -207,13 +207,20 @@ object VueSlots {
 		Index(slots, imports)
 	}
 
+	/** A slot-filling `<template>` inside the root `<template>`, at any depth, but not inside another slot's content. */
 	private fun slotOf(file: PsiFile, tag: XmlTag): Slot? {
-		if (tag.name != "template") return null
-		val root = tag.parentTag?.parentTag ?: return null
-		if (root.name != "template" || root.parentTag != null) return null
-		val attribute = tag.attributes.firstOrNull { name(it.name) != null } ?: return null
+		val attribute = slotAttribute(tag) ?: return null
+		var up = tag.parentTag ?: return null
+		while (up.parentTag != null) {
+			if (slotAttribute(up) != null) return null
+			up = up.parentTag!!
+		}
+		if (up.name != "template") return null
 		return Slot(name(attribute.name)!!, file, attribute.nameElement ?: attribute)
 	}
+
+	private fun slotAttribute(tag: XmlTag) =
+		if (tag.name == "template") tag.attributes.firstOrNull { name(it.name) != null } else null
 
 	private fun name(attribute: String): String? = NAME.find(attribute)?.groupValues?.get(1)
 

@@ -47,9 +47,21 @@ object Migrations {
 		fun all(d: PsiDirectory): List<PhpFile> = d.files.filterIsInstance<PhpFile>() + d.subdirectories.flatMap { all(it) }
 		val files = all(dir).sortedBy { it.name }
 		for (file in files) {
+			// source order, so a rename moves the columns declared before it
 			for (call in PsiTreeUtil.findChildrenOfType(file, MethodReference::class.java)) {
+				// down() undoes up(): a rename back would undo it here too
+				if ((PsiTreeUtil.getParentOfType(call, com.jetbrains.php.lang.psi.elements.Method::class.java))?.name == "down") continue
+				val isSchema = (call.classReference as? ClassReference)?.name == "Schema"
+				if ((isSchema && call.name == "rename") || call.name == "renameTable") {
+					val from = (call.parameters.getOrNull(0) as? StringLiteralExpression)?.contents ?: continue
+					val to = (call.parameters.getOrNull(1) as? StringLiteralExpression)?.contents ?: continue
+					val moved = tables.remove(from) ?: continue
+					val into = tables.getOrPut(to) { LinkedHashMap() }
+					for ((name, elements) in moved) into.getOrPut(name) { ArrayList() } += elements
+					continue
+				}
 				if (call.name != "create" && call.name != "table") continue
-				if ((call.classReference as? ClassReference)?.name != "Schema") continue
+				if (!isSchema) continue
 				val params = call.parameters
 				val table = (params.getOrNull(0) as? StringLiteralExpression)?.contents ?: continue
 				val closure = params.getOrNull(1)?.let { it as? Function ?: PsiTreeUtil.findChildOfType(it, Function::class.java) } ?: continue

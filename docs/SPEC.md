@@ -1,6 +1,7 @@
 # ITTI Laravel Template Support — Feature Specification
 
-Version 1.0 · 2026-11-17 · describes the PhpStorm plugin as of commit `3eaf289`
+Version 1.1 · 2026-11-17 · describes the PhpStorm plugin as of commit `3eaf289`, plus 1.1's changes: slots under a
+wrapper element (§4.8), table renames (§4.4), no bare `mdi-` (§5, §6.9)
 
 This document specifies what the editor extension does, independently of any editor platform. It is written so the
 same features can be rebuilt for another editor (VS Code first). Section 11 maps the concepts onto VS Code APIs;
@@ -136,7 +137,14 @@ whose first parameter is the blueprint variable. Inside, each `$blueprint->metho
 | `morphs('x')` and the `nullable`/`uuid`/`ulid` variants | `x_id`, `x_type` |
 | `userstamps()` (project macro) | `created_by`, `updated_by` (the call) |
 
-Files are processed in file-name order across all subdirectories (dated names keep migration order). A table name used
+Two calls rename a table, moving all its columns (with their targets) to the new name, merged into any it already has:
+
+- `Schema::rename('a', 'b')`;
+- any call named `renameTable('a', 'b')` with two string arguments — the projects use a migration helper by that name.
+
+Files are processed in file-name order across all subdirectories (dated names keep migration order), and the calls in a
+file in source order, so a rename applies to the columns declared before it. Everything inside a method named `down`
+is ignored: it undoes `up()` (a rename back, columns re-added) and would otherwise undo it here too. A table name used
 on both sides of a multi-tenant project merges its columns — accepted.
 
 ### 4.5 Lang keys
@@ -184,9 +192,10 @@ Map of dotted view name → file (§3).
 
 For each `.vue` file under `resources/js`:
 
-- **Slots filled**: every `<template>` element carrying an attribute `#name` or `v-slot:name` (name matches
-  `[A-Za-z_][\w.-]*`; dynamic `#[name]` is ignored) **whose parent element is a direct child of the file's root
-  `<template>`**. Deeper `<template #x>`s fill inner widgets' slots and are excluded.
+- **Slots filled**: every `<template>` element inside the file's root `<template>` carrying an attribute `#name` or
+  `v-slot:name` (name matches `[A-Za-z_][\w.-]*`; dynamic `#[name]` is ignored) **that is not itself inside another
+  slot-filling `<template>`**, at any depth (a page may wrap its form in a `<div>`). One nested inside a slot's content
+  fills an inner widget's slot (a menu's `#activator`) and is excluded.
 - **Imports**: every `import X from "<relative path>.vue"`, resolved against the file's directory.
 - **Reachable set**: a set of files plus everything they import, transitively.
 
@@ -234,7 +243,7 @@ Rules are evaluated in the order given; the first that applies wins for that hos
 | # | Condition | Reference kind (§6) |
 |---|---|---|
 | Y1 | value of a key matching `^[a-z]+Key$` (`labelKey`, `titleKey`, `hintKey`, `textKey`, `htmlKey`…) | Lang key |
-| Y2 | value matching `^mdi-[a-z0-9-]*$` | Icon |
+| Y2 | value matching `^mdi-[a-z0-9-]+$` | Icon |
 | Y3 | value of key `html-preset` | Rich-text preset |
 
 The following apply **only in schema files** (§3) and only when §4.2 finds a model. *Path* is the list of keys from the
@@ -257,7 +266,7 @@ then `formLayout`, has ≥ 3 entries and does not contain `props`.
 | # | Condition | Kind |
 |---|---|---|
 | P1 | a declaration string (§8.1) | Declaration (self) |
-| P2 | value matching `^mdi-[a-z0-9-]*$` | Icon |
+| P2 | value matching `^mdi-[a-z0-9-]+$` | Icon |
 | P3 | the first string argument of a `#[Restricted]` attribute | Permission (§4.10) |
 | P4 | in `config/mail-templates.php`, a string containing `{{ name }}` | Mail placeholder, one reference per `{{ … }}` (name range only), against that entry's placeholders |
 | P5 | first argument of a call named `render`, `renderPreview`, `isEnabled`, `forCode` or `definition` that resolves to a method of a class named `MailTemplateRenderer` or `EmailTemplate`; or a string assigned to a variable that is later passed as that first argument | Mail template code |
@@ -282,14 +291,14 @@ entry's `fields` keys.
 
 | # | Condition | Kind |
 |---|---|---|
-| J1 | a quoted string matching `^mdi-[a-z0-9-]*$` | Icon |
+| J1 | a quoted string matching `^mdi-[a-z0-9-]+$` | Icon |
 | J2 | the first argument of a call whose callee name is `t`, `$t`, `tc`, `$tc`, `te`, `$te`, `trans`, `trans_choice` or `__` | Lang key |
 
 ### 5.4 HTML / Vue template attributes
 
 | # | Condition | Kind |
 |---|---|---|
-| H1 | an attribute value matching `^mdi-[a-z0-9-]*$` (e.g. `icon="mdi-home"`) | Icon |
+| H1 | an attribute value matching `^mdi-[a-z0-9-]+$` (e.g. `icon="mdi-home"`) | Icon |
 
 ---
 
@@ -377,6 +386,9 @@ Target: the key in `config('rich-text.presets')`. Completion: preset names. Diag
 Target: the icon's entry in `_variables.scss`. Completion: all icon names, each with its glyph. A glyph preview is shown
 in the gutter/margin of the line, tooltip = icon name. Diagnostic (only if the icon index exists): **warning**
 `Unknown icon '<value>'`.
+
+A bare `mdi-` is not an icon (it is the start of a concatenation, `'mdi-' + name`); only while completing does a value
+with nothing after `mdi-` count, so that completion is offered there.
 
 ### 6.10 Permission
 
@@ -547,3 +559,7 @@ Each line is a scenario the implementation must satisfy (all are covered by the 
     `'brand_new' => 'Brand new',` after the last entry of `common`.
 14. `- repeater: notes` where `notes` has no `array-item` warns; `- repeater: lines` with `array-item` does not.
 15. `- list: users` offers the route line, `UsersCtrl` and the three schema files.
+16. A page whose root is `<div><super-edit-form><template #reset_user_password>` fills `reset_user_password`.
+17. A table created as `vendors` and renamed by `renameTable('vendors', 'business_partners')` in `up()` (and back in
+    `down()`) gives `BusinessPartner` the `vendors` columns.
+18. `'mdi-' + icon.name` is not reported as an unknown icon.

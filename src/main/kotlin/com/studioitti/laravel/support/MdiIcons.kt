@@ -18,11 +18,14 @@ import javax.swing.Icon
 
 /** Material Design Icons from the project's own `node_modules/@mdi/font`: names, codepoints, glyphs. */
 object MdiIcons {
-	private val NAME = Regex("^mdi-[a-z0-9-]*$")
+	private val NAME = Regex("^mdi-[a-z0-9-]+$")
+	private val PREFIX = Regex("^mdi-[a-z0-9-]*$")
 
-	/** `mdi-…`, also mid-completion, when the value still carries the dummy identifier. */
-	fun isName(text: String): Boolean =
-		NAME.matches(text.replace(com.intellij.codeInsight.completion.CompletionUtil.DUMMY_IDENTIFIER_TRIMMED, "").trimEnd())
+	/** `mdi-…` with a name after it; mid-completion (the value still carries the dummy identifier) `mdi-` alone too. */
+	fun isName(text: String): Boolean {
+		val typed = text.replace(com.intellij.codeInsight.completion.CompletionUtil.DUMMY_IDENTIFIER_TRIMMED, "").trimEnd()
+		return (if (typed != text.trimEnd()) PREFIX else NAME).matches(typed)
+	}
 	private val ENTRY = Regex("\"([a-z0-9-]+)\": ([0-9A-Fa-f]+)")
 	private const val BASE = "node_modules/@mdi/font"
 	private val KEY = Key.create<com.intellij.psi.util.CachedValue<Index>>("itti.mdi")
