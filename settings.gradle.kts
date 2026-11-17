@@ -1,6 +1,6 @@
 import org.jetbrains.intellij.platform.gradle.extensions.intellijPlatform
 
-rootProject.name = "itti-laravel-plugin"
+rootProject.name = "itti-laravel-intellij"
 
 pluginManagement {
     plugins {
