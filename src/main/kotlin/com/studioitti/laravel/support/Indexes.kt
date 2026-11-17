@@ -15,6 +15,8 @@ import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.psi.xml.XmlTag
 import com.jetbrains.php.lang.psi.PhpFile
 import com.jetbrains.php.lang.psi.elements.ArrayCreationExpression
+import com.jetbrains.php.lang.psi.elements.ArrayHashElement
+import com.jetbrains.php.lang.psi.elements.ForeachStatement
 import com.jetbrains.php.lang.psi.elements.FunctionReference
 import com.jetbrains.php.lang.psi.elements.MethodReference
 import com.jetbrains.php.lang.psi.elements.StringLiteralExpression
@@ -38,11 +40,15 @@ private fun PsiDirectory.allFiles(): List<PsiFile> = files.toList() + subdirecto
 object Routes {
 	private val RESOURCE_ACTIONS = listOf("index", "create", "store", "show", "edit", "update", "destroy")
 
-	class Index(val routes: Map<String, PsiElement>, val resources: Map<String, StringLiteralExpression>)
+	/** `patterns`: names interpolated from something the index cannot list, `$x` matching any one segment. */
+	class Index(val routes: Map<String, PsiElement>, val resources: Map<String, StringLiteralExpression>, val patterns: List<Pair<Regex, PsiElement>> = emptyList()) {
+		fun route(name: String): PsiElement? = routes[name] ?: patterns.firstOrNull { it.first.matches(name) }?.second
+	}
 
 	fun index(context: PsiElement): Index = cachedOn(context, "routes", Index(emptyMap(), emptyMap())) { dir ->
 		val routes = LinkedHashMap<String, PsiElement>()
 		val resources = LinkedHashMap<String, StringLiteralExpression>()
+		val patterns = ArrayList<Pair<Regex, PsiElement>>()
 		val files = dir.allFiles().filterIsInstance<PhpFile>()
 		val filePrefixes = filePrefixes(files, dir)
 		for (file in files) {
@@ -50,8 +56,12 @@ object Routes {
 			for (call in PsiTreeUtil.findChildrenOfType(file, FunctionReference::class.java)) {
 				val first = call.parameters.firstOrNull() as? StringLiteralExpression ?: continue
 				when {
-					call is MethodReference && call.name == "name" && !isGroupPrefix(call) ->
-						routes.putIfAbsent(filePrefix + enclosingPrefix(call) + first.contents, first)
+					call is MethodReference && call.name == "name" && !isGroupPrefix(call) -> {
+						val prefix = filePrefix + enclosingPrefix(call)
+						val names = expand(first)
+						if (names != null) names.forEach { routes.putIfAbsent(prefix + it, first) }
+						else patterns += Regex(Regex.escape(prefix) + VAR.split(first.contents).joinToString("[^.]+") { Regex.escape(it) }) to first
+					}
 					call !is MethodReference && call.name == "itti_resource_route" -> {
 						val name = filePrefix + enclosingPrefix(call) + first.contents
 						resources.putIfAbsent(name, first)
@@ -63,7 +73,49 @@ object Routes {
 				}
 			}
 		}
-		Index(routes, resources)
+		Index(routes, resources, patterns)
+	}
+
+	private val VAR = Regex("""\{?\$([A-Za-z_]\w*)\}?""")
+
+	/** A name with `$var` in it, once per value of the `foreach` that sets each var; null when one cannot be listed. */
+	private fun expand(literal: StringLiteralExpression): List<String>? {
+		val text = literal.contents
+		if (literal.isSingleQuote || !VAR.containsMatchIn(text)) return listOf(text)
+		var out = listOf(text)
+		for (name in VAR.findAll(text).map { it.groupValues[1] }.distinct()) {
+			val values = loopValues(literal, name) ?: return null
+			val use = Regex("""\{?\$$name\}?(?!\w)""")
+			out = out.flatMap { t -> values.map { v -> t.replace(use, Regex.escapeReplacement(v)) } }
+		}
+		return out
+	}
+
+	/** `foreach (<array> as $k => $v)`: the keys or values `$name` takes, for a literal or `config()` array (also through `array_keys`). */
+	private fun loopValues(element: PsiElement, name: String): List<String>? {
+		var e = element.parent
+		while (e != null && e !is PsiFile) {
+			if (e is ForeachStatement) {
+				val array = e.array
+				if (e.value?.name == name) {
+					val keysOf = (array as? FunctionReference)?.takeIf { it.name == "array_keys" }?.parameters?.firstOrNull()
+					return if (keysOf != null) arrayOf(keysOf)?.let { a -> PhpArrays.entries(a).map { it.first } }
+					else arrayOf(array)?.children?.mapNotNull { c ->
+						(if (c is ArrayHashElement) PhpArrays.value(c) else PhpArrays.unwrap(c)) as? StringLiteralExpression
+					}?.map { it.contents }
+				}
+				if (e.key?.name == name) return arrayOf(array)?.let { a -> PhpArrays.entries(a).map { it.first } }
+			}
+			e = e.parent
+		}
+		return null
+	}
+
+	private fun arrayOf(e: PsiElement?): ArrayCreationExpression? = when {
+		e is ArrayCreationExpression -> e
+		e is FunctionReference && e !is MethodReference && e.name == "config" ->
+			(e.parameters.firstOrNull() as? StringLiteralExpression)?.let { PhpArrays.configValue(e, it.contents) } as? ArrayCreationExpression
+		else -> null
 	}
 
 	/** The calls chained onto this one: `->name('x.')` in `->name('x.')->group(…)`. */

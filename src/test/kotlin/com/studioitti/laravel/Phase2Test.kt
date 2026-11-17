@@ -186,6 +186,29 @@ class Phase2Test : BasePlatformTestCase() {
 		assertFalse(routes.toString(), "central." in routes || "run" in routes)
 	}
 
+	fun testRouteNamesBuiltInALoop() {
+		myFixture.addFileToProject("config/subjects.php", "<?php return ['list' => ['assets' => ['x' => 1], 'staff' => []]];")
+		myFixture.addFileToProject("routes/loops.php", """
+			<?php
+			foreach (array_keys(config('subjects.list', [])) as ${d}subject) {
+				Route::get("r/${d}subject", fn() => 1)->name("req.${d}subject.edit");
+			}
+			foreach (['a', 'b'] as ${d}k => ${d}v) {
+				Route::get("v", fn() => 1)->name("lit.{${d}v}");
+			}
+			foreach (${d}unknown as ${d}u) {
+				Route::get("u", fn() => 1)->name("dyn.${d}u.show");
+			}
+		""".trimIndent())
+		val nav = refs("config/navigation.php", "<?php return ['left' => [['route' => 'req.ass<caret>ets.edit']]];")
+		assertEquals("\"req.${d}subject.edit\"", nav.single().single().text)
+		val index = com.studioitti.laravel.support.Routes.index(myFixture.file)
+		val names = index.routes.keys
+		assertTrue(names.toString(), listOf("req.assets.edit", "req.staff.edit", "lit.a", "lit.b").all { it in names })
+		assertNotNull(index.route("dyn.anything.show"))
+		assertNull(index.route("dyn.a.b.show"))
+	}
+
 	fun testNestedListResolvesToItsResourceRoute() {
 		val r = refs("app/Domains/Users/EditSchema.yaml", "edit:\n  formLayout:\n    - list: users.lo<caret>gins\n")
 		assertEquals("'users.logins'", r.single().single().text)

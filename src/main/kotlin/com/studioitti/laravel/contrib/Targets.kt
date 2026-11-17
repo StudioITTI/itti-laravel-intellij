@@ -34,7 +34,7 @@ object Targets {
 	/** A route name: `navigation.php` `route`. */
 	fun route(element: PsiElement, value: String, range: TextRange) = one(TargetReference(
 		element, range,
-		{ listOfNotNull(Routes.index(element).routes[value]) },
+		{ listOfNotNull(Routes.index(element).route(value)) },
 		{ Routes.index(element).routes.keys.map { lookup(it, "route", AllIcons.Nodes.Related) } },
 		"Unknown route '$value'",
 	))
