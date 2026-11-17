@@ -10,6 +10,7 @@ import com.intellij.lang.annotation.Annotator
 import com.intellij.lang.annotation.HighlightSeverity
 import com.intellij.lang.javascript.psi.JSLiteralExpression
 import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.editor.markup.GutterIconRenderer
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.TextRange
 import com.intellij.patterns.PlatformPatterns
@@ -20,6 +21,8 @@ import com.intellij.psi.PsiReferenceContributor
 import com.intellij.psi.PsiReferenceProvider
 import com.intellij.psi.PsiReferenceRegistrar
 import com.intellij.psi.util.PsiTreeUtil
+import com.intellij.psi.xml.XmlAttributeValue
+import javax.swing.Icon
 import com.intellij.util.ProcessingContext
 import com.jetbrains.php.lang.psi.elements.StringLiteralExpression
 import org.jetbrains.yaml.psi.YAMLScalar
@@ -41,6 +44,12 @@ class JsReferenceContributor : PsiReferenceContributor() {
 	}
 }
 
+class XmlReferenceContributor : PsiReferenceContributor() {
+	override fun registerReferenceProviders(registrar: PsiReferenceRegistrar) {
+		registrar.registerReferenceProvider(PlatformPatterns.psiElement(XmlAttributeValue::class.java), Provider)
+	}
+}
+
 class PhpReferenceContributor : PsiReferenceContributor() {
 	override fun registerReferenceProviders(registrar: PsiReferenceRegistrar) {
 		registrar.registerReferenceProvider(PlatformPatterns.psiElement(StringLiteralExpression::class.java), Provider)
@@ -50,7 +59,7 @@ class PhpReferenceContributor : PsiReferenceContributor() {
 /** Unknown translation keys, keys missing in some locale, unknown fields and relations. */
 class ReferenceAnnotator : Annotator {
 	override fun annotate(element: PsiElement, holder: AnnotationHolder) {
-		if (element !is YAMLScalar && element !is JSLiteralExpression && element !is StringLiteralExpression) return
+		if (element !is YAMLScalar && element !is JSLiteralExpression && element !is StringLiteralExpression && element !is XmlAttributeValue) return
 		val refs = References.of(element)
 		if (refs.isEmpty()) return
 		val base = element.textRange.startOffset
@@ -79,7 +88,30 @@ class ReferenceAnnotator : Annotator {
 			val problem = ref.step?.problem ?: continue
 			holder.newAnnotation(HighlightSeverity.WARNING, problem).range(ref.rangeInElement.shiftRight(base)).create()
 		}
+
+		for (ref in refs.filterIsInstance<TargetReference>()) {
+			val range = ref.rangeInElement.shiftRight(base)
+			if (ref.unknown != null && ref.resolved.isEmpty()) {
+				holder.newAnnotation(ref.severity, ref.unknown).range(range).create()
+			}
+			ref.gutterIcon?.invoke()?.let { icon ->
+				holder.newSilentAnnotation(HighlightSeverity.INFORMATION).range(range).gutterIconRenderer(IconGutter(icon, ref.value)).create()
+			}
+		}
+
+		for (ref in refs.filterIsInstance<Targets.PermissionCheck>()) {
+			for (problem in ref.problems()) {
+				holder.newAnnotation(HighlightSeverity.WEAK_WARNING, problem).range(ref.rangeInElement.shiftRight(base)).create()
+			}
+		}
 	}
+}
+
+private class IconGutter(private val icon: Icon, private val name: String) : GutterIconRenderer() {
+	override fun getIcon(): Icon = icon
+	override fun getTooltipText(): String = name
+	override fun equals(other: Any?) = other is IconGutter && other.name == name
+	override fun hashCode() = name.hashCode()
 }
 
 /** Typing `.` (or the `:` of `rel:`) inside one of our strings reopens completion. */

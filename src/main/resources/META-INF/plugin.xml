@@ -8,6 +8,9 @@
         <ul>
             <li>translation keys (<code>labelKey</code> &amp; co. in schema YAML and PHP arrays, <code>t()</code> / <code>$t()</code> in Vue), per segment, every locale</li>
             <li><code>rel:</code> paths and field names in <code>ModelSchema</code> / <code>ListSchema</code> / <code>EditSchema</code> YAML, through the model's relations</li>
+            <li>slots, nested lists, repeater item fields, <code>html-preset</code> and <code>mdi-*</code> icons (with previews)</li>
+            <li>config registries: navigation routes, Blade views and partials, block layouts, mail templates and placeholders, <code>#[Restricted]</code> permissions</li>
+            <li>gutter navigation between a domain's model, controller, schema YAML and Vue pages</li>
         </ul>
     ]]></description>
 
@@ -21,11 +24,17 @@
                                   implementation="com.studioitti.laravel.contrib.YamlReferenceContributor"/>
         <psi.referenceContributor language="JavaScript"
                                   implementation="com.studioitti.laravel.contrib.JsReferenceContributor"/>
+        <psi.referenceContributor language="HTML"
+                                  implementation="com.studioitti.laravel.contrib.XmlReferenceContributor"/>
         <psi.referenceContributor language="PHP"
                                   implementation="com.studioitti.laravel.contrib.PhpReferenceContributor"/>
         <annotator language="yaml" implementationClass="com.studioitti.laravel.contrib.ReferenceAnnotator"/>
         <annotator language="JavaScript" implementationClass="com.studioitti.laravel.contrib.ReferenceAnnotator"/>
         <annotator language="PHP" implementationClass="com.studioitti.laravel.contrib.ReferenceAnnotator"/>
+        <annotator language="HTML" implementationClass="com.studioitti.laravel.contrib.ReferenceAnnotator"/>
+        <codeInsight.lineMarkerProvider language="PHP" implementationClass="com.studioitti.laravel.contrib.PhpDomainLineMarker"/>
+        <codeInsight.lineMarkerProvider language="yaml" implementationClass="com.studioitti.laravel.contrib.YamlDomainLineMarker"/>
+        <codeInsight.lineMarkerProvider language="HTML" implementationClass="com.studioitti.laravel.contrib.VueSlotLineMarker"/>
         <typedHandler implementation="com.studioitti.laravel.contrib.DotAutoPopup"/>
     </extensions>
 </idea-plugin>
