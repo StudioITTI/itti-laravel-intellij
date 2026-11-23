@@ -94,9 +94,20 @@ class Phase3Test : BasePlatformTestCase() {
 			use App\Domains\Users\UsersCtrl;
 			itti_resource_route('users', UsersCtrl::class);
 		""")
+		add("lang/en.json", """
+			{
+			    "admin.chrome.cancel": "Cancel",
+			    "admin.chrome.only_en": "Only here"
+			}
+		""")
+		add("lang/bg.json", """
+			{
+			    "admin.chrome.cancel": "Отказ"
+			}
+		""")
 		add("resources/js/Pages/Admin/Users/Edit.vue", """
 			<script setup>
-			const title = t('admin.common.created_by')
+			const title = t('admin.chrome.cancel')
 			</script>
 			<template>
 			  <super-edit-form>
@@ -133,7 +144,8 @@ class Phase3Test : BasePlatformTestCase() {
 
 	fun testLangKeyUsagesFromItsDeclaration() {
 		val key = literal("resources/lang/en/admin.php", "created_by")
-		assertEquals(listOf("Edit.vue", "ListSchema.yaml"), usagesIn(key))
+		// a Vue t() call is a frontend key, in lang/*.json, not a use of the PHP file
+		assertEquals(listOf("ListSchema.yaml"), usagesIn(key))
 		assertTrue(com.studioitti.laravel.contrib.UsagesHandlerFactory().canFindUsages(key))
 	}
 
@@ -145,7 +157,44 @@ class Phase3Test : BasePlatformTestCase() {
 		assertTrue(text("resources/lang/en/admin.php").contains("'made_by' => 'Created by'"))
 		assertTrue(text("resources/lang/bg/admin.php").contains("'made_by' => 'Създаден от'"))
 		assertTrue(text("app/Domains/Users/ListSchema.yaml").contains("titleKey: admin.common.made_by"))
-		assertTrue(text("resources/js/Pages/Admin/Users/Edit.vue").contains("t('admin.common.made_by')"))
+	}
+
+	private fun jsonKey(path: String, key: String): com.intellij.json.psi.JsonStringLiteral =
+		PsiTreeUtil.findChildrenOfType(file(path), com.intellij.json.psi.JsonStringLiteral::class.java).first { it.value == key }
+
+	fun testFrontendKeyCompletesFromTheJsonKeys() {
+		val vue = myFixture.addFileToProject("resources/js/X.vue", "<script setup>t('admin.chrome.x')</script>")
+		myFixture.configureFromExistingVirtualFile(vue.virtualFile)
+		val host = myFixture.file.findReferenceAt(myFixture.file.text.indexOf("chrome") + 1)!!.element
+		val refs = References.of(host).filterIsInstance<com.studioitti.laravel.lang.JsonKeyReference>()
+		val names = { i: Int -> refs[i].variants.map { (it as com.intellij.codeInsight.lookup.LookupElement).lookupString } }
+		assertEquals(listOf("admin"), names(0))
+		assertEquals(listOf("chrome"), names(1))
+		assertEquals(listOf("cancel", "only_en"), names(2))
+	}
+
+	fun testFrontendKeyWarningsAndFix() {
+		val vue = myFixture.addFileToProject("resources/js/X.vue", "<script setup>t('admin.chrome.brand_<caret>new'); t('admin.chrome.only_en')</script>")
+		myFixture.configureFromExistingVirtualFile(vue.virtualFile)
+		val w = myFixture.doHighlighting().mapNotNull(HighlightInfo::getDescription)
+		assertTrue(w.toString(), "Unknown translation key 'admin.chrome.brand_new'" in w && "Translation 'admin.chrome.only_en' missing in: bg" in w)
+		myFixture.launchAction(myFixture.findSingleIntention("Add 'admin.chrome.brand_new' to en, bg"))
+		assertEquals("{\n    \"admin.chrome.cancel\": \"Отказ\",\n    \"admin.chrome.brand_new\": \"Brand new\"\n}", text("lang/bg.json"))
+		assertTrue(text("lang/en.json").endsWith("\"admin.chrome.only_en\": \"Only here\",\n    \"admin.chrome.brand_new\": \"Brand new\"\n}"))
+	}
+
+	fun testFrontendKeyUsagesAndRename() {
+		val key = jsonKey("lang/en.json", "admin.chrome.cancel")
+		assertEquals(listOf("Edit.vue"), usagesIn(key))
+		assertTrue(com.studioitti.laravel.contrib.UsagesHandlerFactory().canFindUsages(key))
+		val vue = file("resources/js/Pages/Admin/Users/Edit.vue")
+		val declarations = DeclarationRenameHandler.declarationsAt(vue, vue.text.indexOf("cancel") + 2)
+		assertEquals(2, declarations.size)
+		assertTrue(DeclarationRenameHandler.declarationsAt(vue, vue.text.indexOf("chrome") + 2).isEmpty())
+		DeclarationRenameHandler.rename(project, declarations, "abort")
+		assertTrue(text("lang/en.json").contains("\"admin.chrome.abort\": \"Cancel\""))
+		assertTrue(text("lang/bg.json").contains("\"admin.chrome.abort\": \"Отказ\""))
+		assertTrue(text("resources/js/Pages/Admin/Users/Edit.vue").contains("t('admin.chrome.abort')"))
 	}
 
 	fun testLangKeyRenameFromAUsage() {

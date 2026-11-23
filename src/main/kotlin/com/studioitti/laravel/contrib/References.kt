@@ -50,6 +50,7 @@ object References {
 		is JSLiteralExpression -> js(element)
 		is StringLiteralExpression -> php(element)
 		is XmlAttributeValue -> xml(element)
+		is com.intellij.json.psi.JsonStringLiteral -> json(element)
 		else -> PsiReference.EMPTY_ARRAY
 	}
 
@@ -134,7 +135,7 @@ object References {
 
 	// ---------------------------------------------------------------- JS / Vue
 
-	/** The first argument of `t('…')`, `$t('…')` and friends; any `'mdi-…'` string. */
+	/** The first argument of `t('…')`, `$t('…')` and friends — a frontend key, in `lang/<locale>.json`; any `'mdi-…'` string. */
 	private fun js(literal: JSLiteralExpression): Array<PsiReference> {
 		if (!literal.isQuotedLiteral) return PsiReference.EMPTY_ARRAY
 		val range = ElementManipulators.getValueTextRange(literal)
@@ -145,8 +146,15 @@ object References {
 		val call = args.parent as? JSCallExpression ?: return PsiReference.EMPTY_ARRAY
 		val name = (call.methodExpression as? JSReferenceExpression)?.referenceName ?: return PsiReference.EMPTY_ARRAY
 		if (name !in TRANSLATE_CALLS) return PsiReference.EMPTY_ARRAY
-		return LangKeys.references(literal, text, range)
+		return com.studioitti.laravel.lang.JsonKeys.references(literal, text, range)
 	}
+
+	/** A key of a JSON lang file refers to itself, so Find Usages and Rename can start there (SPEC §8.1). */
+	private fun json(literal: com.intellij.json.psi.JsonStringLiteral): Array<PsiReference> =
+		if (com.studioitti.laravel.lang.JsonKeys.isKey(literal)) {
+			arrayOf(DeclarationReference(literal, ElementManipulators.getValueTextRange(literal)))
+		}
+		else PsiReference.EMPTY_ARRAY
 
 	/** `icon="mdi-…"` and the like in Vue templates. */
 	private fun xml(value: XmlAttributeValue): Array<PsiReference> {

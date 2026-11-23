@@ -1,5 +1,7 @@
 package com.studioitti.laravel.contrib
 
+import com.studioitti.laravel.lang.JsonKeyReference
+import com.studioitti.laravel.lang.JsonKeys
 import com.studioitti.laravel.lang.LangKeyReference
 import com.studioitti.laravel.lang.LangKeys
 import com.studioitti.laravel.model.Models
@@ -103,7 +105,7 @@ object Declarations {
 }
 
 /** A declaration's reference to itself: Find Usages and Rename start here. Never a usage of anything. */
-class DeclarationReference(literal: StringLiteralExpression, range: TextRange) : PsiReferenceBase<PsiElement>(literal, range, true) {
+class DeclarationReference(literal: PsiElement, range: TextRange) : PsiReferenceBase<PsiElement>(literal, range, true) {
 	override fun resolve(): PsiElement = element
 	override fun isReferenceTo(element: PsiElement) = false
 }
@@ -144,6 +146,7 @@ class UsageSearcher : QueryExecutorBase<PsiReference, ReferencesSearch.SearchPar
 				is YAMLKeyValue -> if (target.containingFile.name.endsWith("Schema.yaml")) listOf(target.keyText) else emptyList()
 				is StringLiteralExpression -> if (Declarations.kind(target) != null) listOf(target.contents.substringAfterLast('.').substringAfterLast('@')) else emptyList()
 				is XmlAttribute -> VueSlots.slotAt(target.nameElement ?: return emptyList())?.let { listOf(it.substringAfterLast('.')) } ?: emptyList()
+				is com.intellij.json.psi.JsonStringLiteral -> if (JsonKeys.isKey(target)) listOf(target.value.substringAfterLast('.')) else emptyList()
 				else -> emptyList()
 			}.filter { it.isNotEmpty() }
 		}
@@ -154,6 +157,7 @@ class UsageSearcher : QueryExecutorBase<PsiReference, ReferencesSearch.SearchPar
 class UsagesHandlerFactory : FindUsagesHandlerFactory() {
 	override fun canFindUsages(element: PsiElement): Boolean = when (element) {
 		is StringLiteralExpression -> Declarations.kind(element) != null
+		is com.intellij.json.psi.JsonStringLiteral -> JsonKeys.isKey(element)
 		is YAMLKeyValue, is XmlAttribute -> UsageSearcher.words(element).isNotEmpty()
 		else -> false
 	}
@@ -168,7 +172,7 @@ class DeclarationRenameHandler : RenameHandler {
 
 	override fun invoke(project: Project, editor: Editor?, file: PsiFile?, dataContext: DataContext) {
 		val declarations = declarations(dataContext)
-		val old = declarations.firstOrNull()?.contents ?: return
+		val old = declarations.firstOrNull()?.let(::nameOf) ?: return
 		val name = Messages.showInputDialog(project, "Rename '$old' and its usages to:", "Rename", null, old, null)
 		if (name.isNullOrBlank() || name == old) return
 		rename(project, declarations, name)
@@ -177,33 +181,48 @@ class DeclarationRenameHandler : RenameHandler {
 	override fun invoke(project: Project, elements: Array<out PsiElement>, dataContext: DataContext) =
 		invoke(project, null, null, dataContext)
 
-	private fun declarations(dataContext: DataContext): List<StringLiteralExpression> {
+	private fun declarations(dataContext: DataContext): List<PsiElement> {
 		val editor = CommonDataKeys.EDITOR.getData(dataContext) ?: return emptyList()
 		val file = CommonDataKeys.PSI_FILE.getData(dataContext) ?: return emptyList()
 		return declarationsAt(file, editor.caretModel.offset)
 	}
 
 	companion object {
-		/** The declarations a caret stands on: one itself, or a usage of a lang key's last segment. */
-		fun declarationsAt(file: PsiFile, offset: Int): List<StringLiteralExpression> {
+		/** The declarations a caret stands on: one itself, or a usage of a lang or frontend key's last segment. */
+		fun declarationsAt(file: PsiFile, offset: Int): List<PsiElement> {
 			val leaf = file.findElementAt(offset) ?: return emptyList()
 			val refs = generateSequence(leaf) { it.parent }.take(4).flatMap { e ->
 				e.references.filter { it.rangeInElement.shiftRight(e.textRange.startOffset).containsOffset(offset) }
 			}
 			for (ref in refs) {
+				val element = ref.element
 				when {
-					ref is DeclarationReference -> {
-						val literal = ref.element as StringLiteralExpression
-						if (Declarations.kind(literal)?.renamable == true) return Declarations.group(literal)
-					}
+					ref is DeclarationReference && element is com.intellij.json.psi.JsonStringLiteral ->
+						return JsonKeys.resolve(element, element.value).map { it.target }
+					ref is DeclarationReference && element is StringLiteralExpression ->
+						if (Declarations.kind(element)?.renamable == true) return Declarations.group(element)
 					ref is LangKeyReference && ref.isLast ->
 						return LangKeys.resolve(ref.element, ref.segments).mapNotNull { it.target as? StringLiteralExpression }
+					ref is JsonKeyReference && ref.isLast ->
+						return JsonKeys.resolve(ref.element, ref.key).map { it.target }
 				}
 			}
 			return emptyList()
 		}
 
-		fun rename(project: Project, declarations: List<StringLiteralExpression>, newName: String) {
+		/** What a rename replaces: a PHP declaration whole, a frontend key's last segment. */
+		fun nameOf(declaration: PsiElement): String = when (declaration) {
+			is com.intellij.json.psi.JsonStringLiteral -> declaration.value.substringAfterLast('.')
+			is StringLiteralExpression -> declaration.contents
+			else -> declaration.text
+		}
+
+		private fun renamed(declaration: PsiElement, newName: String): String = when (declaration) {
+			is com.intellij.json.psi.JsonStringLiteral -> declaration.value.substringBeforeLast('.', "").let { if (it.isEmpty()) newName else "$it.$newName" }
+			else -> newName
+		}
+
+		fun rename(project: Project, declarations: List<PsiElement>, newName: String) {
 			val scope = GlobalSearchScope.projectScope(project)
 			// found before anything changes; one per string and range, last first within a file
 			val usages = declarations.flatMap { ReferencesSearch.search(it, scope).findAll() }
@@ -211,7 +230,7 @@ class DeclarationRenameHandler : RenameHandler {
 				.sortedByDescending { it.element.textRange.startOffset + it.rangeInElement.startOffset }
 			WriteCommandAction.runWriteCommandAction(project, "Rename", null, {
 				for (usage in usages) if (usage.element.isValid) usage.handleElementRename(newName)
-				for (d in declarations) if (d.isValid) ElementManipulators.handleContentChange(d, newName)
+				for (d in declarations) if (d.isValid) ElementManipulators.handleContentChange(d, renamed(d, newName))
 				PsiDocumentManager.getInstance(project).commitAllDocuments()
 			})
 		}

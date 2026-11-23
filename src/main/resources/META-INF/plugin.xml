@@ -18,6 +18,7 @@
     <depends>com.jetbrains.php</depends>
     <depends>org.jetbrains.plugins.yaml</depends>
     <depends>JavaScript</depends>
+    <depends>com.intellij.modules.json</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <psi.referenceContributor language="yaml"
@@ -26,6 +27,8 @@
                                   implementation="com.studioitti.laravel.contrib.JsReferenceContributor"/>
         <psi.referenceContributor language="HTML"
                                   implementation="com.studioitti.laravel.contrib.XmlReferenceContributor"/>
+        <psi.referenceContributor language="JSON"
+                                  implementation="com.studioitti.laravel.contrib.JsonReferenceContributor"/>
         <psi.referenceContributor language="PHP"
                                   implementation="com.studioitti.laravel.contrib.PhpReferenceContributor"/>
         <annotator language="yaml" implementationClass="com.studioitti.laravel.contrib.ReferenceAnnotator"/>

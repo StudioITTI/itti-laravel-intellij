@@ -1,7 +1,8 @@
 # ITTI Laravel Template Support — Feature Specification
 
-Version 1.1 · 2026-11-17 · describes the PhpStorm plugin as of commit `3eaf289`, plus 1.1's changes: slots under a
-wrapper element (§4.8), table renames (§4.4), no bare `mdi-` (§5, §6.9)
+Version 1.2 · 2026-11-23 · describes the PhpStorm plugin as of commit `3eaf289`, plus 1.1's changes: slots under a
+wrapper element (§4.8), table renames (§4.4), no bare `mdi-` (§5, §6.9); and 1.2's: frontend `t()` keys resolve in
+`lang/<locale>.json` (§4.5, §6.14, §8, §10)
 
 This document specifies what the editor extension does, independently of any editor platform. It is written so the
 same features can be rebuilt for another editor (VS Code first). Section 11 maps the concepts onto VS Code APIs;
@@ -158,6 +159,13 @@ The resolver returns one node per locale where the prefix exists. A node is eith
 - **Group variants** (first segment): the union of `*.php` file names across locale directories.
 - **JSON keys**: a key that appears verbatim (as a JSON string, `"the.key"`) in any `<locale>.json` counts as known.
 
+**Frontend keys.** The admin SPA translates with laravel-vue-i18n, which loads **only** `lang/<locale>.json` (whole
+keys, no groups); the PHP lang files never reach it. The JSON index: every `<locale>.json` directly in `lang/` or
+`resources/lang/` (locale = file name, `en` first), each a flat object of `"key": "text"` entries, recorded with the
+position of each key string. Completion splits the keys on `.`: after a prefix, the distinct next segments of the keys
+that start with it — a segment with more after it is a branch (accepting it appends `.` and re-opens completion), the
+last one a leaf showing its text.
+
 ### 4.6 Route index
 
 Built from every PHP file under `routes/`.
@@ -292,7 +300,7 @@ entry's `fields` keys.
 | # | Condition | Kind |
 |---|---|---|
 | J1 | a quoted string matching `^mdi-[a-z0-9-]+$` | Icon |
-| J2 | the first argument of a call whose callee name is `t`, `$t`, `tc`, `$tc`, `te`, `$te`, `trans`, `trans_choice` or `__` | Lang key |
+| J2 | the first argument of a call whose callee name is `t`, `$t`, `tc`, `$tc`, `te`, `$te`, `trans`, `trans_choice` or `__` | Frontend key (§6.14) |
 
 ### 5.4 HTML / Vue template attributes
 
@@ -413,6 +421,19 @@ Accompanies the field path of Y4. **Warning** `'<value>' has no array-item in Mo
 repeater` when the field exists (§4.3) but its ModelSchema entry is missing or has no `array-item`. No warning when the
 field is unknown altogether (the field path already says so).
 
+### 6.14 Frontend key
+
+A translation key in JS / Vue (J2), resolved in the JSON index (§4.5), never in the PHP lang files. Same skip rules as
+§6.1.
+
+- One reference per segment, for completion; **every segment resolves to the whole key's entry** in each locale's JSON
+  file (the JSON stores the key whole). Only the last segment counts as a usage of the key (§8.2).
+- Completion: the JSON key segments after the prefix (§4.5).
+- Diagnostics, as in §6.1 (last segment, ≥ 2 segments, none empty; range = the whole key), counted over the JSON
+  locales: no JSON file has it → **warning** `Unknown translation key '<key>'`; some lack it → **weak warning**
+  `Translation '<key>' missing in: <locales>`. Both offer the quick fix of §10, writing into the JSON files.
+- Presentation: `<locale>: <text>`, location = the JSON file's path.
+
 ---
 
 ## 7. Navigation markers
@@ -442,6 +463,9 @@ and "rename" can be started from it; that self-reference is never reported as a 
 | Mail placeholder | an array key inside a `placeholders` array in `config/mail-templates.php` | yes |
 | Migration column | the first argument of a `$blueprint->method('…')` call in a migration | yes |
 
+One JSON string is a declaration too: a **key** in a JSON lang file (`(resources/)?lang/<locale>.json`) — a frontend
+key (§6.14), renamable in every locale at once. Its words (§8.2) are its last `.` segment.
+
 ### 8.2 What find-references covers
 
 For each element below, search the project for the given **words** (identifier-like tokens) in YAML/JS/TS/Vue files
@@ -463,8 +487,11 @@ attribute).
   - **Accessor rule:** when a field-path segment resolves to an accessor method and its text is that method's derived
     snake_case name, the new text is derived the same way (`getDisplayNameAttribute` → `display_name`).
 - **Declaration strings** (renamable ones) use a custom rename:
-  1. Available when the cursor is on a renamable declaration, or on the **last** segment of a lang-key reference.
-  2. The set renamed together: for a lang key, the same key in every locale; otherwise the string alone.
+  1. Available when the cursor is on a renamable declaration, or on the **last** segment of a lang-key or frontend-key
+     reference.
+  2. The set renamed together: for a lang or frontend key, the same key in every locale; otherwise the string alone.
+     A frontend key renames its **last segment** only, in each JSON key and in each usage: `admin.chrome.cancel` →
+     `admin.chrome.abort`.
   3. Ask for the new name (default: the current one).
   4. Collect all usages of every member **before** editing; de-duplicate by (string, range); apply from the end of each
      file backwards; then replace each declaration's contents. One undoable command.
@@ -493,6 +520,13 @@ For each missing locale that already has the group file:
 5. Strings are single-quoted with `\` and `'` escaped.
 
 Locales without the group file are skipped.
+
+For a frontend key (§6.14) the edit goes into each missing locale's JSON file instead, which must exist: insert
+`"<key>": "<value>"` (JSON-escaped) after the object's last entry, on its own line and indented like it, adding the
+comma the previous last entry now needs (JSON allows no trailing comma). For an empty object, replace its interior with
+`
+    "<key>": "<value>"
+`. The value rule is the same.
 
 ## 11. Mapping to VS Code (non-normative)
 
@@ -563,3 +597,8 @@ Each line is a scenario the implementation must satisfy (all are covered by the 
 17. A table created as `vendors` and renamed by `renameTable('vendors', 'business_partners')` in `up()` (and back in
     `down()`) gives `BusinessPartner` the `vendors` columns.
 18. `'mdi-' + icon.name` is not reported as an unknown icon.
+19. `t('admin.chrome.cancel')` in a Vue file, with the key only in `lang/en.json` and `lang/bg.json`, resolves to both
+    JSON entries; Ctrl+click on `admin` does not open `resources/lang/en/admin.php`.
+20. `t('admin.chrome.brand_new')` warns and offers `Add 'admin.chrome.brand_new' to en, bg`, which appends
+    `"admin.chrome.brand_new": "Brand new"` to both JSON files.
+21. Renaming `cancel` in `t('admin.chrome.cancel')` to `abort` renames the key in both JSON files and every `t()` call.

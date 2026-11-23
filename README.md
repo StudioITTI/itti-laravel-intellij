@@ -6,11 +6,12 @@ field and `rel:` paths, slots, config registries, permissions, mail templates. W
 
 ## Features
 
-**Translation keys** (YAML `*Key`, PHP `'…Key' =>`, `t()` / `$t()` / `__()` in JS/Vue)
+**Translation keys** (YAML `*Key` and PHP `'…Key' =>` in `resources/lang/<locale>/*.php`; `t()` / `$t()` / `__()` in
+JS/Vue in `lang/<locale>.json`, the only file the SPA reads)
 - Ctrl+click any segment → that key in every locale, each row labelled `en: …` / `bg: …`
 - Completion level by level
 - Warnings: unknown key, missing in a locale
-- Alt+Enter: add the key to the missing locales
+- Alt+Enter: add the key to the missing locales (the PHP or the JSON files)
 
 **Schema YAML** (Model/List/EditSchema)
 - Field names and `rel:` paths: Ctrl+click each segment to the relation, column, schema field or accessor; completion;

@@ -1,6 +1,9 @@
 package com.studioitti.laravel.contrib
 
+import com.studioitti.laravel.lang.CreateJsonKeyFix
 import com.studioitti.laravel.lang.CreateLangKeyFix
+import com.studioitti.laravel.lang.JsonKeyReference
+import com.studioitti.laravel.lang.JsonKeys
 import com.studioitti.laravel.lang.LangKeyReference
 import com.studioitti.laravel.lang.LangKeys
 import com.studioitti.laravel.model.FieldPathReference
@@ -51,6 +54,13 @@ class XmlReferenceContributor : PsiReferenceContributor() {
 	}
 }
 
+/** Keys of the JSON lang files, so Find Usages and Rename can start from them. */
+class JsonReferenceContributor : PsiReferenceContributor() {
+	override fun registerReferenceProviders(registrar: PsiReferenceRegistrar) {
+		registrar.registerReferenceProvider(PlatformPatterns.psiElement(com.intellij.json.psi.JsonStringLiteral::class.java), Provider)
+	}
+}
+
 class PhpReferenceContributor : PsiReferenceContributor() {
 	override fun registerReferenceProviders(registrar: PsiReferenceRegistrar) {
 		registrar.registerReferenceProvider(PlatformPatterns.psiElement(StringLiteralExpression::class.java), Provider)
@@ -83,6 +93,23 @@ class ReferenceAnnotator : Annotator {
 			if (missing.isNotEmpty()) {
 				holder.newAnnotation(HighlightSeverity.WEAK_WARNING, "Translation '$key' missing in: ${missing.joinToString(", ")}")
 					.range(range).withFix(CreateLangKeyFix(segments, missing)).create()
+			}
+		}
+
+		// frontend keys (SPEC §6.14): counted over the JSON lang files only
+		val json = refs.filterIsInstance<JsonKeyReference>()
+		json.lastOrNull()?.let { last ->
+			val segments = last.segments
+			if (!last.isLast || segments.size < 2 || segments.any { it.isEmpty() }) return@let
+			val key = last.key
+			val range = TextRange(json.first().rangeInElement.startOffset, last.rangeInElement.endOffset).shiftRight(base)
+			val found = JsonKeys.resolve(element, key).map { it.locale }.toSet()
+			val missing = JsonKeys.locales(element).filter { it !in found }
+			when {
+				found.isEmpty() -> holder.newAnnotation(HighlightSeverity.WARNING, "Unknown translation key '$key'").range(range)
+					.withFix(CreateJsonKeyFix(key, missing)).create()
+				missing.isNotEmpty() -> holder.newAnnotation(HighlightSeverity.WEAK_WARNING, "Translation '$key' missing in: ${missing.joinToString(", ")}")
+					.range(range).withFix(CreateJsonKeyFix(key, missing)).create()
 			}
 		}
 

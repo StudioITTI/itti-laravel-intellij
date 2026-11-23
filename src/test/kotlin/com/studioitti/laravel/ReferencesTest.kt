@@ -122,13 +122,19 @@ class ReferencesTest : BasePlatformTestCase() {
 		assertEquals("color", (segments[1].single() as org.jetbrains.yaml.psi.YAMLKeyValue).keyText)
 	}
 
-	fun testVueTranslateCall() {
+	/** The SPA reads lang/<locale>.json only: every segment is the whole JSON key, never the PHP group file. */
+	fun testVueTranslateCallResolvesInTheJsonFiles() {
+		myFixture.addFileToProject("lang/en.json", "{\n    \"admin.chrome.cancel\": \"Cancel\"\n}")
+		myFixture.addFileToProject("lang/bg.json", "{\n    \"admin.chrome.cancel\": \"Отказ\"\n}")
 		val segments = targets(
-			"<template><div>{{ \$t('admin.common.<caret>created_by') }}</div></template>",
+			"<template><div>{{ \$t('admin.chrome.<caret>cancel') }}</div></template>",
 			"Edit.vue", "resources/js/Pages/Admin/Users/Edit.vue",
 		)
 		assertEquals(3, segments.size)
-		assertEquals(2, segments[2].size)
+		for (segment in segments) {
+			val rows = segment.map { com.intellij.codeInsight.navigation.targetPresentation(it).let { p -> "${p.presentableText} | ${p.containerText}" } }
+			assertEquals(listOf("en: Cancel | lang/en.json", "bg: Отказ | lang/bg.json"), rows)
+		}
 	}
 
 	fun testPhpLabelKey() {
