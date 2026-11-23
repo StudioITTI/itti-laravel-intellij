@@ -1,6 +1,6 @@
 # GitHub Actions Workflow created for handling the release process based on the draft release prepared with the Build workflow.
-# Running the publishPlugin task requires all the following secrets to be provided: PUBLISH_TOKEN, PRIVATE_KEY, PRIVATE_KEY_PASSWORD, CERTIFICATE_CHAIN.
-# See https://plugins.jetbrains.com/docs/intellij/plugin-signing.html for more information.
+# The plugin is not on JetBrains Marketplace: publishing a release attaches the zip and updatePlugins.xml to it, and
+# PhpStorm reads the latest release's updatePlugins.xml as a custom plugin repository (see README).
 
 name: Release
 on:
@@ -9,9 +9,9 @@ on:
 
 jobs:
 
-  # Prepare and publish the plugin to JetBrains Marketplace repository
+  # Build the plugin and attach it, with its update feed, to the release
   release:
-    name: Publish Plugin
+    name: Release Plugin
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -56,20 +56,19 @@ jobs:
 
           ./gradlew patchChangelog --release-note-file=$RELEASE_NOTE
 
-      # Publish the plugin to JetBrains Marketplace
-      - name: Publish Plugin
-        env:
-          PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
-          CERTIFICATE_CHAIN: ${{ secrets.CERTIFICATE_CHAIN }}
-          PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
-          PRIVATE_KEY_PASSWORD: ${{ secrets.PRIVATE_KEY_PASSWORD }}
-        run: ./gradlew publishPlugin
+      # Build the plugin zip
+      - name: Build Plugin
+        run: ./gradlew buildPlugin
 
-      # Upload an artifact as a release asset
+      # Write updatePlugins.xml, pointing at this release's zip
+      - name: Write Update Feed
+        run: bash .github/scripts/update-plugins-xml.sh "${{ github.event.release.tag_name }}"
+
+      # Upload the zip and updatePlugins.xml as release assets
       - name: Upload Release Asset
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload ${{ github.event.release.tag_name }} ./build/distributions/*
+        run: gh release upload ${{ github.event.release.tag_name }} ./build/distributions/* --clobber
 
       # Create a pull request
       - name: Create Pull Request

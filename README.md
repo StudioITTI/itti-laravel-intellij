@@ -55,22 +55,21 @@ restart PhpStorm (the version number does not change between builds).
 
 ## Installation
 
-- Using the IDE built-in plugin system:
+The plugin is not on JetBrains Marketplace. Each GitHub release carries the zip and an `updatePlugins.xml`, which
+PhpStorm reads as a custom plugin repository, so it offers new releases as ordinary plugin updates:
 
-  <kbd>Settings/Preferences</kbd> > <kbd>Plugins</kbd> > <kbd>Marketplace</kbd> > <kbd>Search for "itti-laravel-intellij"</kbd> >
-  <kbd>Install</kbd>
+1. *Settings → Plugins → ⚙ → Manage Plugin Repositories…*, add
+   `https://github.com/StudioITTI/itti-laravel-intellij/releases/latest/download/updatePlugins.xml`
+2. *Marketplace* tab → search for "ITTI Laravel" → *Install*
 
-- Using JetBrains Marketplace:
+A copy installed from disk earlier is the same plugin (same ID) and updates from the repository from then on.
 
-  Go to [JetBrains Marketplace](https://plugins.jetbrains.com/plugin/MARKETPLACE_ID) and install it by clicking the <kbd>Install to ...</kbd> button in case your IDE is running.
+## Releasing
 
-  You can also download the [latest release](https://plugins.jetbrains.com/plugin/MARKETPLACE_ID/versions) from JetBrains Marketplace and install it manually using
-  <kbd>Settings/Preferences</kbd> > <kbd>Plugins</kbd> > <kbd>⚙️</kbd> > <kbd>Install plugin from disk...</kbd>
-
-- Manually:
-
-  Download the [latest release](https://github.com/StudioITTI/itti-laravel-intellij/releases/latest) and install it manually using
-  <kbd>Settings/Preferences</kbd> > <kbd>Plugins</kbd> > <kbd>⚙️</kbd> > <kbd>Install plugin from disk...</kbd>
+1. Raise `version` in `gradle.properties` and list the changes under `## [Unreleased]` in `CHANGELOG.md`.
+2. Push to `main`. The Build workflow prepares a draft release with those notes.
+3. Publish the draft on GitHub. The Release workflow attaches the zip and `updatePlugins.xml` to it, and opens a pull
+   request moving the notes under the version's heading in `CHANGELOG.md`.
 
 
 ---
